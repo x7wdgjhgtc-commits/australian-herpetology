@@ -187,6 +187,21 @@ export default function Browse() {
     });
   }, [merged, genus]);
 
+  // Render in chunks so the initial paint stays fast even when the catalog
+  // returns 1000+ species. The intersection observer at the bottom of the
+  // list expands this as the user scrolls. Resets whenever the underlying
+  // result set changes (filter, search, group).
+  const CHUNK = 60;
+  const [visibleCount, setVisibleCount] = useState(CHUNK);
+  useEffect(() => {
+    setVisibleCount(CHUNK);
+  }, [debouncedQ, group, familyId, genus]);
+  const visible = useMemo(
+    () => flat.slice(0, visibleCount),
+    [flat, visibleCount],
+  );
+  const hasMoreToShow = visibleCount < flat.length;
+
   // Use the merged-catalog total so admin-added species count toward the
   // headline tally. Falls back to the iNat total while the catalog query is
   // loading so the number doesn't flash to 0.
@@ -214,30 +229,27 @@ export default function Browse() {
       .sort((a, b) => (b.count - a.count) || a.name.localeCompare(b.name));
   }, [merged]);
 
-  // Infinite-scroll sentinel
+  // Infinite-scroll sentinel — grows the visible window, AND opportunistically
+  // pulls the next iNat page for photo enrichment of later catalog rows.
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     const el = sentinelRef.current;
     if (!el) return;
     const obs = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting && hasNextPage && !isFetching) {
+        if (!entries[0].isIntersecting) return;
+        if (hasMoreToShow) {
+          setVisibleCount((n) => n + CHUNK);
+        }
+        if (hasNextPage && !isFetching) {
           fetchNextPage();
         }
       },
-      { rootMargin: "300px" },
+      { rootMargin: "600px" },
     );
     obs.observe(el);
     return () => obs.disconnect();
-  }, [hasNextPage, isFetching, fetchNextPage]);
-
-  // Eagerly drain pages when a genus filter is active so client-side filtering
-  // doesn't leave the user staring at a near-empty grid.
-  useEffect(() => {
-    if (genus && hasNextPage && !isFetching && flat.length < 24) {
-      fetchNextPage();
-    }
-  }, [genus, hasNextPage, isFetching, flat.length, fetchNextPage]);
+  }, [hasNextPage, isFetching, fetchNextPage, hasMoreToShow]);
 
   // Showing N · total catalog count is always the merged catalog size for the
   // current group/family/search scope. Genus narrows further client-side.
@@ -524,7 +536,7 @@ export default function Browse() {
         <>
           {viewMode === "grid" && (
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-            {flat.map((r) => {
+            {visible.map((r) => {
               const tax = classifySpecies({
                 ancestorIds: r.taxon.ancestor_ids,
                 name: r.taxon.name,
@@ -589,7 +601,7 @@ export default function Browse() {
           )}
           {viewMode === "list" && (
           <div className="divide-y divide-border border border-border rounded-lg overflow-hidden bg-card">
-            {flat.map((r) => {
+            {visible.map((r) => {
               const tax = classifySpecies({
                 ancestorIds: r.taxon.ancestor_ids,
                 name: r.taxon.name,
@@ -653,7 +665,7 @@ export default function Browse() {
           </div>
           )}
           <div ref={sentinelRef} className="h-12" />
-          {isFetching && hasNextPage && (
+          {(hasMoreToShow || (isFetching && hasNextPage)) && (
             <div className="text-center text-sm text-muted-foreground py-6">
               Loading more…
             </div>

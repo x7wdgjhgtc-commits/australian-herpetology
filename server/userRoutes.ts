@@ -1477,11 +1477,25 @@ export function registerUserRoutes(app: Express) {
   // GET /api/species/catalog
   // Optional filters: group, familyId, genus, q
   // Returns: { species: CatalogEntry[] }
+  //
+  // Cached in-process for 60s keyed by filter params. The hero-URL bulk
+  // resolve is the expensive part (3 queries against species_overrides /
+  // records / likes for ~1200 ids). A short TTL keeps the browse page snappy
+  // while admin edits still propagate within a minute.
+  const catalogCache = new Map<string, { at: number; body: unknown }>();
+  const CATALOG_TTL_MS = 60_000;
   app.get("/api/species/catalog", (req: Request, res: Response) => {
     const group = (req.query.group as string) || null;
     const familyId = req.query.familyId ? parseInt(req.query.familyId as string, 10) : null;
     const genus = (req.query.genus as string) || null;
     const q = ((req.query.q as string) || "").toLowerCase().trim();
+    const cacheKey = `${group ?? ""}|${familyId ?? ""}|${genus ?? ""}|${q}`;
+    const cached = catalogCache.get(cacheKey);
+    if (cached && Date.now() - cached.at < CATALOG_TTL_MS) {
+      res.set("Cache-Control", "private, max-age=60");
+      res.json(cached.body);
+      return;
+    }
     let rows = buildMergedCatalog();
     if (group) rows = rows.filter((r) => r.group === group);
     if (familyId) rows = rows.filter((r) => r.familyId === familyId);
@@ -1490,11 +1504,6 @@ export function registerUserRoutes(app: Express) {
       (r.scientific || "").toLowerCase().includes(q) ||
       (r.common || "").toLowerCase().includes(q),
     );
-    // Inject heroPhotoUrl for species with a user-record hero (admin-forced,
-    // admin-pinned, or top-liked). Species without a user hero return null
-    // and the client falls back to the iNat default_photo path — which
-    // catalog rows don't carry today, so the Browse-merge code overlays the
-    // iNat default_photo from its parallel iNat fetch.
     let enriched: Array<
       (typeof rows)[number] & { heroPhotoUrl: string | null }
     > = rows.map((r) => ({ ...r, heroPhotoUrl: null }));
@@ -1510,7 +1519,10 @@ export function registerUserRoutes(app: Express) {
     } catch (e) {
       console.warn("[catalog] hero resolution failed:", e);
     }
-    res.json({ species: enriched, total: enriched.length });
+    const body = { species: enriched, total: enriched.length };
+    catalogCache.set(cacheKey, { at: Date.now(), body });
+    res.set("Cache-Control", "private, max-age=60");
+    res.json(body);
   });
 
   // Common-name aliases that herpers use but iNat doesn't store. Keyed by
