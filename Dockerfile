@@ -44,10 +44,16 @@ RUN npm ci --omit=dev \
 # Bring in the built artifacts and the catalog JSONs the server reads at boot.
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/scripts ./scripts
+# Seed dir: one-time DB snapshot + boot wrapper that restores it on first boot.
+# After the persistent disk has data, the wrapper skips the restore. Once the
+# user confirms data is live on the disk, remove the seed bundle in a follow-up
+# deploy to slim the image back down.
+COPY --from=build /app/seed ./seed
+RUN chmod +x /app/seed/boot.sh
 
 # Persistent disk gets mounted here by Render. data.db lives inside it so it
 # survives deploys/restarts. App reads DB_PATH at boot.
 ENV DB_PATH=/var/data/data.db
 EXPOSE 5000
 
-CMD ["node", "dist/index.cjs"]
+CMD ["/app/seed/boot.sh"]
