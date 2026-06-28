@@ -3,6 +3,7 @@ import { Link } from "wouter";
 import { useMutation } from "@tanstack/react-query";
 import L from "leaflet";
 import australiaOutline from "@/lib/australiaOutline.json";
+import australiaStates from "@/lib/australiaStates.json";
 import { fetchAreaSpecies, type AreaSpeciesResponse, type SpeciesGroup } from "@/lib/api";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Crosshair, Loader2, MapPin } from "lucide-react";
@@ -43,15 +44,45 @@ export default function MapSearch() {
     // Self-hosted Australia outline as basemap. The deploy iframe CSP
     // (img-src 'self') blocks remote tile servers, so we draw a vector
     // basemap from bundled GeoJSON instead.
+    L.rectangle([[-90, -180], [90, 360]], {
+      stroke: false,
+      fillColor: "hsl(205 35% 88%)",
+      fillOpacity: 1,
+      interactive: false,
+    }).addTo(map);
     const baseLayer = L.geoJSON(australiaOutline as GeoJSON.Feature, {
       style: {
         color: "hsl(140 25% 35%)",
-        weight: 1,
-        fillColor: "hsl(40 30% 92%)",
+        weight: 1.2,
+        fillColor: "hsl(45 38% 93%)",
         fillOpacity: 1,
       },
       interactive: false,
     }).addTo(map);
+    L.geoJSON(australiaStates as GeoJSON.GeoJsonObject, {
+      style: {
+        color: "hsl(140 18% 45%)",
+        weight: 0.8,
+        dashArray: "3 3",
+        opacity: 0.55,
+        fill: false,
+      },
+      interactive: false,
+    }).addTo(map);
+    const gridLayer = L.layerGroup().addTo(map);
+    const gridStyle = {
+      color: "hsl(140 15% 55%)",
+      weight: 0.4,
+      opacity: 0.35,
+      interactive: false,
+    } as L.PolylineOptions;
+    for (let lat = -50; lat <= 0; lat += 10) {
+      L.polyline([[lat, 100], [lat, 165]], gridStyle).addTo(gridLayer);
+    }
+    for (let lng = 110; lng <= 160; lng += 10) {
+      L.polyline([[-45, lng], [-8, lng]], gridStyle).addTo(gridLayer);
+    }
+    L.control.scale({ imperial: false, position: "bottomleft" }).addTo(map);
     const ausBounds = baseLayer.getBounds();
     const fitAustralia = () => {
       if (ausBounds.isValid()) {

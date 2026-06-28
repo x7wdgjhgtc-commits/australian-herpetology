@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Hand, MapPinOff, Pentagon, MousePointerClick, Trash2 } from "lucide-react";
 import australiaOutline from "@/lib/australiaOutline.json";
+import australiaStates from "@/lib/australiaStates.json";
 
 interface Props {
   speciesId: number;
@@ -53,12 +54,14 @@ const CELL_SIZE = 0.5; // degrees
 function cellColor(cell: DistributionGridCell, maxCount: number): string {
   if (cell.source === "admin" && cell.count === 0) {
     // Admin-added empty cell — show as pale lavender
-    return "hsl(280 50% 70%)";
+    return "hsl(280 50% 72%)";
   }
-  // Logarithmic ramp for nicer visual gradient
+  // Two-stop yellow → green ramp (log scale to compress popular species)
   const ratio = maxCount > 0 ? Math.log10(1 + cell.count) / Math.log10(1 + maxCount) : 0;
-  const lightness = 70 - ratio * 40; // 70% (light) → 30% (dark)
-  return `hsl(140 55% ${lightness}%)`;
+  const hue = 60 + (145 - 60) * ratio;
+  const lightness = 75 - 40 * ratio;
+  const saturation = 55 + 10 * ratio;
+  return `hsl(${hue.toFixed(0)} ${saturation.toFixed(0)}% ${lightness.toFixed(0)}%)`;
 }
 
 function cellBoundsLatLng(latIdx: number, lngIdx: number): L.LatLngBoundsLiteral {
@@ -87,7 +90,9 @@ export default function GridDistributionMap({ speciesId, isAdmin, height = 520 }
   // Pending delete confirmation (AlertDialog) — window.confirm is blocked in iframe
   const [pendingDelete, setPendingDelete] = useState<DeleteTarget | null>(null);
 
-  const includePoints = isAdmin === true;
+  // Everyone sees individual record points on the species map. The hide /
+  // edit tools remain admin-only — a non-admin click just opens the record.
+  const includePoints = true;
   const queryKey = ["/api/species/distribution-grid", speciesId, { points: includePoints }];
 
   const { data, isLoading, error } = useQuery<DistributionGridResponse>({
@@ -211,15 +216,48 @@ export default function GridDistributionMap({ speciesId, isAdmin, height = 520 }
     // Bundled Australia outline as basemap. Remote tile servers are
     // blocked by the deploy iframe CSP (img-src 'self'), so we draw a
     // self-hosted vector basemap instead.
+    // Ocean fill behind everything
+    L.rectangle([[-90, -180], [90, 360]], {
+      stroke: false,
+      fillColor: "hsl(205 35% 88%)",
+      fillOpacity: 1,
+      interactive: false,
+    }).addTo(map);
     const baseLayer = L.geoJSON(australiaOutline as GeoJSON.Feature, {
       style: {
         color: "hsl(140 25% 35%)",
-        weight: 1,
-        fillColor: "hsl(40 30% 92%)",
+        weight: 1.2,
+        fillColor: "hsl(45 38% 93%)",
         fillOpacity: 1,
       },
       interactive: false,
     }).addTo(map);
+    // State / territory boundaries (subtle dashed)
+    L.geoJSON(australiaStates as GeoJSON.GeoJsonObject, {
+      style: {
+        color: "hsl(140 18% 45%)",
+        weight: 0.8,
+        dashArray: "3 3",
+        opacity: 0.55,
+        fill: false,
+      },
+      interactive: false,
+    }).addTo(map);
+    // 10° graticule
+    const gridLayer = L.layerGroup().addTo(map);
+    const gridStyle = {
+      color: "hsl(140 15% 55%)",
+      weight: 0.4,
+      opacity: 0.35,
+      interactive: false,
+    } as L.PolylineOptions;
+    for (let lat = -50; lat <= 0; lat += 10) {
+      L.polyline([[lat, 100], [lat, 165]], gridStyle).addTo(gridLayer);
+    }
+    for (let lng = 110; lng <= 160; lng += 10) {
+      L.polyline([[-45, lng], [-8, lng]], gridStyle).addTo(gridLayer);
+    }
+    L.control.scale({ imperial: false, position: "bottomleft" }).addTo(map);
     // Always fit Australia in the viewport on mount.
     const ausBounds = baseLayer.getBounds();
     if (ausBounds.isValid()) {
@@ -367,23 +405,32 @@ export default function GridDistributionMap({ speciesId, isAdmin, height = 520 }
     const layer = pointLayerRef.current;
     if (!layer || !data) return;
     layer.clearLayers();
-    if (!isAdmin) return;
     const points = data.points ?? [];
+    const sourceStyle = (src: string) => {
+      if (src === "app") {
+        return { color: "hsl(20 75% 32%)", fill: "hsl(20 85% 55%)", label: "Field record" };
+      }
+      if (src === "ala") {
+        return { color: "hsl(220 70% 28%)", fill: "hsl(220 75% 55%)", label: "ALA" };
+      }
+      return { color: "hsl(36 80% 28%)", fill: "hsl(36 85% 55%)", label: "iNaturalist" };
+    };
     for (const pt of points) {
+      const style = sourceStyle(pt.source);
       const marker = L.circleMarker([pt.lat, pt.lng], {
-        radius: 3,
+        radius: pt.source === "app" ? 4 : 3,
         weight: 1,
-        color: "hsl(0 0% 15%)",
-        fillColor: pt.source === "ala" ? "hsl(220 70% 55%)" : "hsl(36 80% 55%)",
+        color: style.color,
+        fillColor: style.fill,
         fillOpacity: 0.85,
       });
       marker.bindTooltip(
-        `<div style="font-size:11px">${pt.source.toUpperCase()} #${pt.id}<br/>${pt.date ?? "no date"}</div>`,
+        `<div style="font-size:11px"><b>${style.label}</b> #${pt.id}<br/>${pt.date ?? "no date"}</div>`,
         { sticky: true },
       );
       marker.on("click", (ev: L.LeafletMouseEvent) => {
         const t = toolRef.current;
-        if (t === "hide") {
+        if (isAdminRef.current && t === "hide") {
           L.DomEvent.stopPropagation(ev);
           setPendingDelete({
             kind: "point",
