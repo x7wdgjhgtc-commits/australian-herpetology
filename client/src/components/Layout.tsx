@@ -199,16 +199,6 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 {item.label}
               </Link>
             ))}
-            <Link
-              href="/about"
-              className={cn(
-                "px-3 py-2 rounded-md text-sm font-medium hover-elevate flex items-center gap-2",
-                isActive("/about") ? "text-primary" : "text-foreground/70",
-              )}
-              data-testid="link-nav-about"
-            >
-              <Info className="h-4 w-4" /> About
-            </Link>
           </nav>
 
           <div className="flex items-center gap-2">
