@@ -1525,6 +1525,34 @@ export function registerUserRoutes(app: Express) {
     res.json(body);
   });
 
+  // Public read-only diagnostic so we can verify what's in production
+  // without shell access. Returns counts + a small sample of admin
+  // species entries. No sensitive data — just ids, names, source flags.
+  app.get("/api/species/catalog/_diag", (_req: Request, res: Response) => {
+    try {
+      const admin = storage.listAdminSpeciesEntries();
+      const sample = admin.slice(0, 20).map((a) => ({
+        id: a.id,
+        scientific: a.scientific,
+        common: a.common,
+        group: a.group,
+        source: a.source,
+        hidden: a.hidden,
+      }));
+      const merged = buildMergedCatalog();
+      res.json({
+        adminEntriesTotal: admin.length,
+        adminEntriesHidden: admin.filter((a) => a.hidden).length,
+        manualIds: admin.filter((a) => a.id >= 90000000).map((a) => a.id),
+        mergedTotal: merged.length,
+        catalogShippedTotal: CATALOG.length,
+        sample,
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: String(e?.message || e) });
+    }
+  });
+
   // Common-name aliases that herpers use but iNat doesn't store. Keyed by
   // subspecies iNat id. Searches by `q` also match these aliases.
   const SUBSPECIES_ALIASES: Record<number, string[]> = {
