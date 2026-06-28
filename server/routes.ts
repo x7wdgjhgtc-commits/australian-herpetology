@@ -154,6 +154,36 @@ export async function registerRoutes(
   registerUserRoutes(app);
 
   /**
+   * POST /api/admin/bootstrap
+   * One-time recovery endpoint: promotes a username to super-admin when the
+   * caller provides the correct ADMIN_BOOTSTRAP_TOKEN env var. Used after a
+   * fresh deploy when the auto-seed (Willhunt) account isn't the one the
+   * operator is logging in with. Disable by removing the env var.
+   *
+   * curl -X POST 'https://<host>/api/admin/bootstrap?username=USER&token=SECRET'
+   */
+  app.post("/api/admin/bootstrap", async (req: Request, res: Response) => {
+    const expected = process.env.ADMIN_BOOTSTRAP_TOKEN;
+    if (!expected) {
+      return res.status(404).json({ error: "bootstrap disabled" });
+    }
+    const provided = String(req.query.token || "");
+    const username = String(req.query.username || "").trim();
+    if (!provided || provided !== expected) {
+      return res.status(403).json({ error: "invalid token" });
+    }
+    if (!username) {
+      return res.status(400).json({ error: "username required" });
+    }
+    const user = storage.getUserByUsername(username);
+    if (!user) {
+      return res.status(404).json({ error: `no user named ${username}` });
+    }
+    storage.setUserRole(user.id, "super-admin");
+    return res.json({ ok: true, userId: user.id, username, role: "super-admin" });
+  });
+
+  /**
    * GET /api/species
    * Query:
    *   q?         — text search
