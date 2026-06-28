@@ -1436,6 +1436,51 @@ export function registerUserRoutes(app: Express) {
   }
   console.log(`[catalog] name resolver populated with ${NAME_TO_SPECIES_ID.size} entries`);
 
+  // ───────── Bootstrap of manual taxa that aren't on iNat ─────────
+  // These were originally added through the admin UI but the persistent
+  // disk has been reset enough times that we now keep them in source so
+  // they survive any reseed / volume swap. Each upsert only writes when the
+  // id is missing — admin edits made afterwards are preserved.
+  const MANUAL_BOOTSTRAP: Array<{
+    id: number;
+    scientific: string;
+    common: string;
+    group: string;
+    familyId: number;
+    familyName: string;
+    genus: string;
+  }> = [
+    { id: 90000000, scientific: "Varanus phosphoros", common: "Yellow-headed Rock Monitor", group: "lizards", familyId: 39392, familyName: "Varanidae", genus: "Varanus" },
+    { id: 90000001, scientific: "Varanus iridis", common: "Rainbow Rock Monitor", group: "lizards", familyId: 39392, familyName: "Varanidae", genus: "Varanus" },
+    { id: 90000002, scientific: "Varanus umbra", common: "Orange-headed Rock Monitor", group: "lizards", familyId: 39392, familyName: "Varanidae", genus: "Varanus" },
+    { id: 90000003, scientific: "Lampropholis isla", common: "Scawfell Island Sunskink", group: "lizards", familyId: 36982, familyName: "Scincidae", genus: "Lampropholis" },
+    { id: 90000004, scientific: "Nactus simakal", common: "Dauan Island Gecko", group: "lizards", familyId: 33177, familyName: "Gekkonidae", genus: "Nactus" },
+  ];
+  try {
+    let bootstrapped = 0;
+    for (const m of MANUAL_BOOTSTRAP) {
+      if (!storage.getAdminSpeciesEntry(m.id)) {
+        storage.upsertAdminSpeciesEntry({
+          id: m.id,
+          source: "manual",
+          scientific: m.scientific,
+          common: m.common,
+          group: m.group,
+          familyId: m.familyId,
+          familyName: m.familyName,
+          genus: m.genus,
+          actorId: 0,
+        });
+        bootstrapped++;
+      }
+    }
+    if (bootstrapped > 0) {
+      console.log(`[catalog] bootstrapped ${bootstrapped} manual species into admin entries`);
+    }
+  } catch (e) {
+    console.warn("[catalog] manual species bootstrap failed:", e);
+  }
+
   /**
    * Merge the shipped CATALOG with admin entries:
    *  - Admin entries with source 'inat' or 'manual' are appended (or replace
