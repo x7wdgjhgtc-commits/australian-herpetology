@@ -318,11 +318,17 @@ function fuzzCoord(value: number, recordId: number, axis: "lat" | "lng"): number
   return Math.round((cell + jitter) * 10000) / 10000;
 }
 
+// When `photoMode === "url"` we replace the (potentially many-MB) base64
+// `photoDataUrl` / `photos[]` strings with relative URLs that the browser
+// fetches lazily via /api/records/:id/photo[/:index]. Used for ALL list
+// endpoints so a 60-record response is ~50KB instead of 100–500MB. Detail
+// endpoint (/api/records/:id) still returns base64 for backwards compat.
 function publicRecord(
   r: any,
   author?: PublicUser,
   viewerId?: number | null,
   meta?: { likeCount?: number; likedByMe?: boolean; commentCount?: number },
+  photoMode: "inline" | "url" = "inline",
 ) {
   // Parse photos array; fall back to legacy single photoDataUrl
   let photos: string[] = [];
@@ -333,6 +339,17 @@ function publicRecord(
     } catch {}
   }
   if (photos.length === 0 && r.photoDataUrl) photos = [r.photoDataUrl];
+
+  // Replace base64 with binary URLs in list contexts. The first photo is
+  // served by /api/records/:id/photo (already cached, immutable). Additional
+  // photos use /api/records/:id/photo/:index (added in the same patch).
+  if (photoMode === "url") {
+    photos = photos.map((p, i) =>
+      p && p.startsWith("data:")
+        ? (i === 0 ? `/api/records/${r.id}/photo` : `/api/records/${r.id}/photo/${i}`)
+        : p,
+    );
+  }
 
   // Parse behaviors array
   let behaviors: string[] = [];
@@ -368,7 +385,11 @@ function publicRecord(
     speciesName: r.speciesName,
     speciesCommon: r.speciesCommon,
     notes: r.notes,
-    photoDataUrl: photos[0] ?? r.photoDataUrl ?? null,
+    photoDataUrl: photos[0]
+      ?? (photoMode === "url" && r.photoDataUrl && String(r.photoDataUrl).startsWith("data:")
+        ? `/api/records/${r.id}/photo`
+        : r.photoDataUrl)
+      ?? null,
     photos,
     lat: outLat,
     lng: outLng,
@@ -412,7 +433,7 @@ function enrichRecordsForList(
       likeCount: likeCounts.get(r.id) ?? 0,
       commentCount: commentCounts.get(r.id) ?? 0,
       likedByMe: viewerLikes.has(r.id),
-    }),
+    }, "url"),
   );
 }
 
@@ -602,7 +623,8 @@ export function registerUserRoutes(app: Express) {
       return;
     }
     // Allow ?limit= override; default to a high cap that covers any realistic
-    // herp life-list (previous default of 100 was hiding records).
+    // herp life-list. Since list responses now return photo URLs (not inline
+    // base64), a 2000-record list is only ~1MB of JSON — safe.
     const rawLimit = parseInt(String(req.query.limit ?? ""), 10);
     const limit = Number.isFinite(rawLimit) && rawLimit > 0
       ? Math.min(rawLimit, 5000)
@@ -823,6 +845,36 @@ export function registerUserRoutes(app: Express) {
   // The photo column stores a data URL like `data:image/jpeg;base64,...`;
   // decode the base64 once and stream the raw bytes back with the proper
   // content-type so browsers cache it normally.
+  // Multi-photo records: /api/records/:id/photo/:index serves photo at
+  // a specific index from photosJson. Used by list endpoints that return
+  // URLs instead of inline base64.
+  app.get("/api/records/:id/photo/:index", (req: Request, res: Response) => {
+    const id = parseInt(req.params.id, 10);
+    const idx = parseInt(req.params.index, 10);
+    if (!Number.isFinite(id) || !Number.isFinite(idx) || idx < 0) {
+      res.status(400).end();
+      return;
+    }
+    const r = storage.getRecord(id);
+    if (!r) { res.status(404).end(); return; }
+    let dataUrl: string | null = null;
+    try {
+      const arr = (r as any).photosJson ? JSON.parse((r as any).photosJson) : null;
+      if (Array.isArray(arr) && typeof arr[idx] === "string" && arr[idx].startsWith("data:")) {
+        dataUrl = arr[idx];
+      }
+    } catch {}
+    if (!dataUrl && idx === 0 && r.photoDataUrl) dataUrl = r.photoDataUrl;
+    if (!dataUrl) { res.status(404).end(); return; }
+    const m = /^data:([^;,]+);base64,(.+)$/.exec(dataUrl);
+    if (!m) { res.status(404).end(); return; }
+    const buf = Buffer.from(m[2], "base64");
+    res.setHeader("Content-Type", m[1] || "image/jpeg");
+    res.setHeader("Content-Length", String(buf.length));
+    res.setHeader("Cache-Control", "public, max-age=86400, immutable");
+    res.end(buf);
+  });
+
   app.get("/api/records/:id/photo", (req: Request, res: Response) => {
     const id = parseInt(req.params.id, 10);
     if (!Number.isFinite(id)) {
