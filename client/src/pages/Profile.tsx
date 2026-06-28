@@ -21,6 +21,7 @@ import { RecordCard } from "@/components/RecordCard";
 import { NoteCard } from "@/components/NoteCard";
 import { queryClient } from "@/lib/queryClient";
 import { SpeciesTally } from "@/components/SpeciesTally";
+import { UserActivityMap } from "@/components/UserActivityMap";
 import { UserRankings } from "@/components/UserRankings";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { AdminBadge } from "@/components/AdminBadge";
@@ -316,6 +317,13 @@ export default function Profile() {
             >
               Species tally
             </TabsTrigger>
+            <TabsTrigger
+              value="activity-map"
+              className="flex-1 sm:flex-none"
+              data-testid="tab-activity-map"
+            >
+              Activity map
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="records" className="mt-5">
@@ -379,6 +387,18 @@ export default function Profile() {
 
           <TabsContent value="tally" className="mt-5">
             <SpeciesTally username={u.username} />
+          </TabsContent>
+
+          <TabsContent value="activity-map" className="mt-5">
+            {recordsQuery.isLoading ? (
+              <div className="text-sm text-muted-foreground">Loading…</div>
+            ) : records.length === 0 ? (
+              <div className="rounded-md border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+                No records yet — nothing to map.
+              </div>
+            ) : (
+              <UserActivityMap records={records} />
+            )}
           </TabsContent>
         </Tabs>
       </div>
