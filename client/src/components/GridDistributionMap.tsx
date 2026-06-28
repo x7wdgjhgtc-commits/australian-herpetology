@@ -583,7 +583,7 @@ export default function GridDistributionMap({ speciesId, isAdmin, height = 520 }
       )}
       <div
         ref={containerRef}
-        className="w-full rounded-lg border border-border overflow-hidden bg-muted/30"
+        className="isolate relative w-full rounded-lg border border-border overflow-hidden bg-muted/30"
         style={{ height }}
         data-testid="map-grid-distribution"
       />

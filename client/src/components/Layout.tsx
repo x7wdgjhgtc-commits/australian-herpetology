@@ -173,7 +173,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     exact ? location === href : location === href || location.startsWith(href + "/");
 
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="min-h-screen flex flex-col overflow-x-hidden">
       {/* Header */}
       <header className="border-b border-border bg-card/60 backdrop-blur sticky top-0 z-40">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">

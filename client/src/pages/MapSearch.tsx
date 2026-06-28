@@ -167,7 +167,7 @@ export default function MapSearch() {
 
       <div className="grid lg:grid-cols-12 gap-0 lg:gap-6">
         {/* Map */}
-        <div className="lg:col-span-7 relative">
+        <div className="lg:col-span-7 relative isolate">
           <div
             ref={containerRef}
             className="w-full border-y lg:border lg:rounded-lg border-border overflow-hidden"

@@ -213,7 +213,7 @@ export function UserActivityMap({ records, height = 520 }: Props) {
       <div
         ref={containerRef}
         data-testid="map-user-activity"
-        className="w-full rounded-md border border-border overflow-hidden"
+        className="isolate relative w-full rounded-md border border-border overflow-hidden"
         style={{ height }}
       />
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">

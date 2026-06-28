@@ -564,7 +564,7 @@ export default function Species() {
       {/* Hero header */}
       <div className="grid lg:grid-cols-12 gap-6 lg:gap-10 mb-12">
         <div className="lg:col-span-7">
-          <div className="relative aspect-[4/3] sm:aspect-[16/10] rounded-lg overflow-hidden border border-border bg-muted">
+          <div className="relative aspect-[3/2] sm:aspect-[16/10] max-h-[55vh] rounded-lg overflow-hidden border border-border bg-muted">
             {heroPhoto?.medium_url ? (
               <img
                 src={biggerPhoto(heroPhoto.medium_url, "large") || ""}
