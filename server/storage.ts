@@ -136,6 +136,14 @@ sqlite.exec(`
 
 // Defensive migrations for older data.db files that pre-date the taxonomy cols.
 function ensureCol(table: string, col: string, ddl: string) {
+  // Skip if the table hasn't been created yet — it'll be created later in this
+  // file with the column already included, so the ALTER would be a no-op anyway.
+  // Critical on fresh DBs (e.g. Render's empty persistent disk on first boot)
+  // where ensureCol() calls can sequence before their CREATE TABLE blocks.
+  const tableExists = sqlite
+    .prepare(`SELECT 1 FROM sqlite_master WHERE type='table' AND name=?`)
+    .get(table);
+  if (!tableExists) return;
   const rows = sqlite.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
   if (!rows.some((r) => r.name === col)) {
     sqlite.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${ddl}`);
@@ -316,6 +324,7 @@ sqlite.exec(`
     record_id INTEGER NOT NULL,
     user_id INTEGER NOT NULL,
     body TEXT NOT NULL,
+    parent_id INTEGER,
     created_at INTEGER NOT NULL
   );
   CREATE INDEX IF NOT EXISTS comments_record_idx ON comments(record_id);
