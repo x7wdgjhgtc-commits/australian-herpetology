@@ -1,0 +1,12 @@
+{
+  "name": "Australian Herpetology",
+  "short_name": "AU Herp",
+  "description": "Field guide to every reptile and amphibian recorded in Australia.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f5ecd9",
+  "theme_color": "#1d3a25",
+  "icons": [
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

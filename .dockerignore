@@ -1,0 +1,22 @@
+node_modules
+dist
+.vite
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+
+# Local DB — never bake into the image. Render mounts the production DB
+# onto /var/data via a persistent disk.
+data.db
+data.db-shm
+data.db-wal
+data.db-journal
+
+*.log
+.DS_Store
+
+# Workspace-only artifacts
+logo-verify-*.png
+attached_assets

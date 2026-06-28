@@ -1,0 +1,35 @@
+# Render Blueprint — one-shot infrastructure definition.
+# Create this stack by going to Render → Blueprints → New Blueprint Instance
+# and pointing it at this repo. Render reads this file on every push.
+#
+# Service summary:
+#   - Web service "australian-herpetology" running the Dockerfile
+#   - Persistent disk mounted at /var/data (holds data.db across deploys)
+#   - Custom domain configured below; Render issues a Let's Encrypt cert
+services:
+  - type: web
+    name: australian-herpetology
+    runtime: docker
+    plan: starter            # $7/mo; bump to standard if traffic grows
+    region: oregon           # change to "singapore" for lower AU latency
+    healthCheckPath: /
+    autoDeploy: true
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "5000"
+      - key: DB_PATH
+        value: /var/data/data.db
+      # Session secret — generated once by Render, kept stable across deploys.
+      # Used by express-session to sign cookies.
+      - key: SESSION_SECRET
+        generateValue: true
+    disk:
+      name: data
+      mountPath: /var/data
+      sizeGB: 1              # plenty for ~88MB of photos + headroom
+    domains:
+      - australianherpetology.com.au
+      - www.australianherpetology.com.au
