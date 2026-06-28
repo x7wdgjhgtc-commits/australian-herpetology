@@ -134,57 +134,49 @@ export default function Browse() {
     },
   });
 
-  // Merge iNat results with catalog overlay.
-  //
-  // Ordering: when the user is actively searching, filtering by family, or
-  // browsing a specific group/family, surface catalog-only species (admin
-  // additions, newly described taxa not yet on iNat) FIRST so they are
-  // visible without scrolling past 30+ iNat rows. When browsing "All" with
-  // no active search/family, keep iNat-first (catalog adds appear at the end).
+  // Unified species list. The merged catalog (admin entries + shipped CATALOG)
+  // is the SOLE source of truth — iNat was only used to seed the foundation.
+  // Every catalog row is rendered identically regardless of origin. We overlay
+  // iNat default_photo URLs from the iNat infinite-scroll fetch onto matching
+  // ids purely as a photo source for cards that don't have a server-resolved
+  // hero. Ordering: alphabetical by scientific name so admin and iNat species
+  // interleave naturally.
   const merged = useMemo<SpeciesCountResult[]>(() => {
-    const seen = new Set<number>();
-    const out: SpeciesCountResult[] = [];
-    const surfaceCatalogFirst = Boolean(debouncedQ) || familyId !== null;
+    // Index iNat results by id so we can lift their default_photo onto the
+    // matching catalog row.
+    const inatById = new Map<number, SpeciesCountResult>();
+    for (const r of allLoaded) inatById.set(r.taxon.id, r);
 
-    // iNat ids already loaded — used to detect catalog-only entries.
-    const inatIds = new Set<number>(allLoaded.map((r) => r.taxon.id));
-
-    const catalogOnly: SpeciesCountResult[] = [];
+    const rows: SpeciesCountResult[] = [];
     for (const c of catalogQuery.data?.species ?? []) {
-      // When a super-group filter is active, restrict overlay to its sub-groups.
+      // When a super-group filter is active, restrict to its sub-groups.
       if (group === "reptiles" && c.group && !(
         c.group === "snakes" || c.group === "lizards" || c.group === "turtles" || c.group === "crocs"
       )) continue;
       if (group === "amphibians" && c.group !== "frogs") continue;
-      if (inatIds.has(c.id)) continue;
-      catalogOnly.push(catalogToResult(c));
+
+      const base = catalogToResult(c);
+      const inat = inatById.get(c.id);
+      if (inat) {
+        // Lift iNat photo + observation count onto the catalog row when
+        // available. The catalog row's heroPhotoUrl still wins in the card.
+        base.count = inat.count;
+        base.taxon.default_photo = inat.taxon.default_photo ?? null;
+        base.taxon.iconic_taxon_name =
+          inat.taxon.iconic_taxon_name ?? base.taxon.iconic_taxon_name;
+        base.taxon.observations_count = inat.taxon.observations_count;
+        base.taxon.ancestor_ids = inat.taxon.ancestor_ids ?? [];
+      }
+      rows.push(base);
     }
 
-    if (surfaceCatalogFirst) {
-      for (const c of catalogOnly) {
-        if (seen.has(c.taxon.id)) continue;
-        seen.add(c.taxon.id);
-        out.push(c);
-      }
-      for (const r of allLoaded) {
-        if (seen.has(r.taxon.id)) continue;
-        seen.add(r.taxon.id);
-        out.push(r);
-      }
-    } else {
-      for (const r of allLoaded) {
-        if (seen.has(r.taxon.id)) continue;
-        seen.add(r.taxon.id);
-        out.push(r);
-      }
-      for (const c of catalogOnly) {
-        if (seen.has(c.taxon.id)) continue;
-        seen.add(c.taxon.id);
-        out.push(c);
-      }
-    }
-    return out;
-  }, [allLoaded, catalogQuery.data, group, debouncedQ, familyId]);
+    rows.sort((a, b) => {
+      const aName = (a.taxon.preferred_common_name || a.taxon.name || "").toLowerCase();
+      const bName = (b.taxon.preferred_common_name || b.taxon.name || "").toLowerCase();
+      return aName.localeCompare(bName);
+    });
+    return rows;
+  }, [allLoaded, catalogQuery.data, group]);
 
   // Filter by genus client-side if set
   const flat = useMemo(() => {
@@ -195,7 +187,11 @@ export default function Browse() {
     });
   }, [merged, genus]);
 
-  const total = data?.pages?.[0]?.total_results ?? 0;
+  // Use the merged-catalog total so admin-added species count toward the
+  // headline tally. Falls back to the iNat total while the catalog query is
+  // loading so the number doesn't flash to 0.
+  const total =
+    catalogQuery.data?.total ?? data?.pages?.[0]?.total_results ?? 0;
 
   // Available families: when a group is selected, list its families.
   // When "All" is selected, no family selector is shown.
@@ -243,10 +239,12 @@ export default function Browse() {
     }
   }, [genus, hasNextPage, isFetching, flat.length, fetchNextPage]);
 
+  // Showing N · total catalog count is always the merged catalog size for the
+  // current group/family/search scope. Genus narrows further client-side.
   const showingCount = flat.length;
   const labelTotal = genus
-    ? `${showingCount.toLocaleString()} loaded · ${total.toLocaleString()} in selection`
-    : `${total.toLocaleString()} species`;
+    ? `${showingCount.toLocaleString()} of ${merged.length.toLocaleString()} species`
+    : `${merged.length.toLocaleString()} species`;
 
   const activeChips = useMemo(() => {
     const chips: { key: string; label: string; onClear: () => void }[] = [];
@@ -278,7 +276,7 @@ export default function Browse() {
           Species
         </h1>
         <p className="text-sm text-muted-foreground mt-1">
-          {total ? `${labelTotal} recorded in Australia` : "Browse the Australian herpetofauna"}
+          {merged.length ? `${labelTotal} in the Australian herpetofauna` : "Browse the Australian herpetofauna"}
         </p>
       </div>
 
@@ -494,7 +492,7 @@ export default function Browse() {
       </div>
 
       {/* Results */}
-      {isLoading ? (
+      {(isLoading || (catalogQuery.isLoading && merged.length === 0)) ? (
         viewMode === "grid" ? (
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
             {Array.from({ length: 12 }).map((_, i) => (
