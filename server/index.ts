@@ -125,11 +125,11 @@ app.use((req, res, next) => {
   // this serves both the API and the client.
   // It is the only port that is not firewalled.
   const port = parseInt(process.env.PORT || "5000", 10);
-  // Bind to 127.0.0.1 in production so we don't conflict with the platform's
-  // host-side port-forwarding listener on 169.254.0.21:5000 (which routes
-  // external traffic to our backend). Dev still uses 0.0.0.0 so the Vite
-  // server is reachable from outside the container.
-  const host = process.env.NODE_ENV === "production" ? "127.0.0.1" : "0.0.0.0";
+  // Bind to all interfaces by default so platforms like Render (which scan for
+  // an open port on 0.0.0.0) can route traffic to the container. HOST env var
+  // lets specific hosts override (e.g. the original Replit setup used 127.0.0.1
+  // to avoid a platform port-forwarding conflict — set HOST=127.0.0.1 there).
+  const host = process.env.HOST || "0.0.0.0";
   httpServer.listen(
     {
       port,
