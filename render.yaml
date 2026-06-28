@@ -30,6 +30,8 @@ services:
       name: data
       mountPath: /var/data
       sizeGB: 1              # plenty for ~88MB of photos + headroom
-    domains:
-      - australianherpetology.com.au
-      - www.australianherpetology.com.au
+    # Custom domains are added via the Render UI AFTER the service is live
+    # so Render can issue the cert against DNS we'll set up at GoDaddy.
+    # Targets:
+    #   - www.australianherpetology.com.au  (CNAME at GoDaddy)
+    #   - australianherpetology.com.au       (GoDaddy 301 forward to www)
