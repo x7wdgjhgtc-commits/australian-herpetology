@@ -19,20 +19,36 @@ MIN_BYTES=1048576
 
 mkdir -p "$DB_DIR"
 
+# Force-reseed control: set FORCE_RESEED=1 in Render env to re-apply the seed
+# on next boot, even if the marker exists. Clear it after the next deploy.
 seed_needed=0
-if [ ! -f "$DB_PATH" ]; then
+seed_sha=""
+if [ -f "$SEED_PATH" ]; then
+  seed_sha=$(sha256sum "$SEED_PATH" | awk '{print $1}')
+fi
+
+if [ "${FORCE_RESEED:-}" = "1" ]; then
+  seed_needed=1
+  reason="FORCE_RESEED=1"
+elif [ ! -f "$DB_PATH" ]; then
   seed_needed=1
   reason="no DB file"
-elif [ -f "$MARKER" ]; then
-  seed_needed=0
-  reason="marker present"
 else
   size=$(wc -c < "$DB_PATH")
   if [ "$size" -lt "$MIN_BYTES" ]; then
     seed_needed=1
     reason="DB is only $size bytes (< $MIN_BYTES)"
+  elif [ -f "$MARKER" ]; then
+    marker_sha=$(cat "$MARKER" 2>/dev/null || echo "")
+    if [ -n "$seed_sha" ] && [ -n "$marker_sha" ] && [ "$seed_sha" != "$marker_sha" ]; then
+      # Seed bundle has changed since we last applied it. Don't auto-overwrite
+      # — production data may have diverged. Operator opts in via FORCE_RESEED.
+      reason="seed bundle changed (marker=$marker_sha, seed=$seed_sha) — NOT auto-reseeding. Set FORCE_RESEED=1 in Render env to apply."
+    else
+      reason="marker matches current seed (or no checksum recorded)"
+    fi
   else
-    reason="DB has $size bytes and no marker, but is large enough — assuming real data"
+    reason="DB has $size bytes and no marker — assuming real data, leaving untouched"
   fi
 fi
 
@@ -44,7 +60,8 @@ if [ "$seed_needed" = "1" ]; then
     rm -f "${DB_PATH}-wal" "${DB_PATH}-shm" "${DB_PATH}-journal"
     gunzip -c "$SEED_PATH" > "$DB_PATH"
     echo "[boot] restored $(wc -c < "$DB_PATH") bytes to $DB_PATH"
-    touch "$MARKER"
+    # Record the seed's checksum so future boots can detect a new bundle.
+    printf '%s' "$seed_sha" > "$MARKER"
   else
     echo "[boot] seed needed ($reason) but no seed bundle in image — server will init an empty DB"
   fi
