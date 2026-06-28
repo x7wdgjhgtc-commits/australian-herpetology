@@ -150,7 +150,12 @@ app.use((req, res, next) => {
       }
       // Kick off the background iNaturalist auto-sync. Runs hourly,
       // re-syncs any connected user whose last import is > 1h old.
-      startInatAutoSync();
+      // Disable via DISABLE_INAT_SCHEDULER=1 to debug crashes / save memory.
+      if (process.env.DISABLE_INAT_SCHEDULER === "1") {
+        log("iNat auto-sync DISABLED via DISABLE_INAT_SCHEDULER=1");
+      } else {
+        startInatAutoSync();
+      }
     },
   );
 })();

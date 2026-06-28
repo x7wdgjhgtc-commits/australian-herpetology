@@ -1570,6 +1570,20 @@ export function registerUserRoutes(app: Express) {
     res.json(body);
   });
 
+  // Public health endpoint — uptime + memory. Lets us tell whether the
+  // container is crash-looping without needing Render shell access.
+  app.get("/api/_health", (_req: Request, res: Response) => {
+    const m = process.memoryUsage();
+    res.json({
+      uptimeSec: Math.round(process.uptime()),
+      rssMb: Math.round(m.rss / 1024 / 1024),
+      heapUsedMb: Math.round(m.heapUsed / 1024 / 1024),
+      heapTotalMb: Math.round(m.heapTotal / 1024 / 1024),
+      node: process.version,
+      now: new Date().toISOString(),
+    });
+  });
+
   // Public read-only diagnostic so we can verify what's in production
   // without shell access. Returns counts + a small sample of admin
   // species entries. No sensitive data — just ids, names, source flags.

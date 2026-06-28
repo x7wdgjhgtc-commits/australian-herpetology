@@ -38,9 +38,18 @@ function sleep(ms: number): Promise<void> {
  * Run one pass: sync every connected user whose last import is older than
  * `staleMs`. Sequential, with a polite delay between users.
  */
+// Memory safety: if RSS is already this high, skip the pass. Render's
+// smallest paid dyno has ~512MB, so we leave headroom for the request path.
+const MAX_RSS_BEFORE_SKIP = 380 * 1024 * 1024;
+
 async function runPass(staleMs: number): Promise<void> {
   if (inFlight) {
     log("skipping pass — previous pass still running");
+    return;
+  }
+  const rss = process.memoryUsage().rss;
+  if (rss > MAX_RSS_BEFORE_SKIP) {
+    log(`skipping pass — RSS ${Math.round(rss / 1024 / 1024)}MB above safety cap`);
     return;
   }
   inFlight = true;
@@ -62,6 +71,12 @@ async function runPass(staleMs: number): Promise<void> {
     for (const user of due) {
       const login = user.inatUsername;
       if (!login) continue;
+      // Abort the rest of the pass if memory is climbing toward the dyno cap.
+      const liveRss = process.memoryUsage().rss;
+      if (liveRss > MAX_RSS_BEFORE_SKIP) {
+        log(`aborting pass mid-loop — RSS ${Math.round(liveRss / 1024 / 1024)}MB above safety cap`);
+        break;
+      }
       try {
         const summary = await syncInatForUser(user.id, login);
         log(
@@ -92,7 +107,11 @@ export function startInatAutoSync(opts?: {
 }): () => void {
   const intervalMs = opts?.intervalMs ?? DEFAULT_INTERVAL_MS;
   const staleMs = opts?.staleMs ?? DEFAULT_STALE_MS;
-  const initialDelayMs = opts?.initialDelayMs ?? 30_000;
+  // Push first pass out to 10m so the container is healthy and serving
+  // traffic long before any iNat sync work begins. Previously 30s — that
+  // caused user-visible crash-loops when a sync pass OOMed the dyno before
+  // anyone could load the site.
+  const initialDelayMs = opts?.initialDelayMs ?? 10 * 60_000;
 
   if (timer) {
     log("already running — ignoring duplicate start");
