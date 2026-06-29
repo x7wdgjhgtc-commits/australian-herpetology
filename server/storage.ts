@@ -522,6 +522,49 @@ export function toPublicUser(u: User): PublicUser {
   };
 }
 
+// ───────── list-mode column projection ─────────
+// Selecting * from records pulls the inline base64 photoDataUrl, photosJson
+// (array of base64 photos), and exifJson columns into memory for EVERY row.
+// A user with hundreds of records × ~500KB photos each = hundreds of MB of
+// heap per request, which SIGKILLs the dyno. List endpoints replace photo
+// blobs with /api/records/:id/photo URLs anyway, so we drop the heavy text
+// columns at query time.
+const LIST_RECORD_COLUMNS = {
+  id: records.id,
+  userId: records.userId,
+  speciesId: records.speciesId,
+  parentSpeciesId: records.parentSpeciesId,
+  speciesName: records.speciesName,
+  speciesCommon: records.speciesCommon,
+  notes: records.notes,
+  // photoDataUrl: NOT selected — replaced by URL in publicRecord()
+  // photosJson:   NOT selected — replaced by URL in publicRecord()
+  // exifJson:     NOT selected — only used in detail endpoint
+  lat: records.lat,
+  lng: records.lng,
+  placeGuess: records.placeGuess,
+  observedOn: records.observedOn,
+  cameraMake: records.cameraMake,
+  cameraModel: records.cameraModel,
+  lens: records.lens,
+  iso: records.iso,
+  fNumber: records.fNumber,
+  shutter: records.shutter,
+  focalLength: records.focalLength,
+  obscureLocation: records.obscureLocation,
+  licenseCode: records.licenseCode,
+  conditionTag: records.conditionTag,
+  behaviorsJson: records.behaviorsJson,
+  groupKey: records.groupKey,
+  familyId: records.familyId,
+  familyName: records.familyName,
+  genus: records.genus,
+  externalId: records.externalId,
+  externalSource: records.externalSource,
+  externalUrl: records.externalUrl,
+  createdAt: records.createdAt,
+};
+
 // ───────── storage class ─────────
 export class DatabaseStorage {
   // --- Users ---
@@ -655,26 +698,26 @@ export class DatabaseStorage {
   }
   listRecordsByUser(userId: number, limit = 50): Record_[] {
     return db
-      .select()
+      .select(LIST_RECORD_COLUMNS)
       .from(records)
       .where(eq(records.userId, userId))
       .orderBy(desc(records.createdAt))
       .limit(limit)
-      .all();
+      .all() as unknown as Record_[];
   }
   listAllRecords(limit = 50): Record_[] {
     return db
-      .select()
+      .select(LIST_RECORD_COLUMNS)
       .from(records)
       .orderBy(desc(records.createdAt))
       .limit(limit)
-      .all();
+      .all() as unknown as Record_[];
   }
   /** Records of a given species, most-recent first. Includes records logged
    * at any subspecies of this species (matched via parent_species_id). */
   listRecordsBySpecies(speciesId: number, limit = 200): Record_[] {
     return db
-      .select()
+      .select(LIST_RECORD_COLUMNS)
       .from(records)
       .where(
         or(
@@ -684,17 +727,17 @@ export class DatabaseStorage {
       )
       .orderBy(desc(records.createdAt))
       .limit(limit)
-      .all();
+      .all() as unknown as Record_[];
   }
   listRecordsByUserIds(userIds: number[], limit = 50): Record_[] {
     if (userIds.length === 0) return [];
     return db
-      .select()
+      .select(LIST_RECORD_COLUMNS)
       .from(records)
       .where(inArray(records.userId, userIds))
       .orderBy(desc(records.createdAt))
       .limit(limit)
-      .all();
+      .all() as unknown as Record_[];
   }
   countRecordsByUser(userId: number): number {
     const r = db

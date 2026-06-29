@@ -331,7 +331,11 @@ function publicRecord(
   meta?: { likeCount?: number; likedByMe?: boolean; commentCount?: number },
   photoMode: "inline" | "url" = "inline",
 ) {
-  // Parse photos array; fall back to legacy single photoDataUrl
+  // Parse photos array; fall back to legacy single photoDataUrl.
+  // In list mode the storage layer drops photoDataUrl/photosJson columns
+  // entirely (they're hundreds of KB each and would OOM the dyno), so we
+  // synthesize the URL purely from r.id. Detail mode still gets the inline
+  // base64 from the DB.
   let photos: string[] = [];
   if (r.photosJson) {
     try {
@@ -343,13 +347,21 @@ function publicRecord(
 
   // Replace base64 with binary URLs in list contexts. The first photo is
   // served by /api/records/:id/photo (already cached, immutable). Additional
-  // photos use /api/records/:id/photo/:index (added in the same patch).
+  // photos use /api/records/:id/photo/:index.
   if (photoMode === "url") {
-    photos = photos.map((p, i) =>
-      p && p.startsWith("data:")
-        ? (i === 0 ? `/api/records/${r.id}/photo` : `/api/records/${r.id}/photo/${i}`)
-        : p,
-    );
+    if (photos.length === 0) {
+      // Columns were dropped at the SQL layer. Assume the record has at
+      // least one photo (photoDataUrl is NOT NULL in schema) and surface
+      // the canonical URL; multi-photo rows can't be detected without
+      // photosJson, but the binary endpoint serves whichever photo exists.
+      photos = [`/api/records/${r.id}/photo`];
+    } else {
+      photos = photos.map((p, i) =>
+        p && p.startsWith("data:")
+          ? (i === 0 ? `/api/records/${r.id}/photo` : `/api/records/${r.id}/photo/${i}`)
+          : p,
+      );
+    }
   }
 
   // Parse behaviors array
