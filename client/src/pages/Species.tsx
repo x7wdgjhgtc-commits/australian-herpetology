@@ -582,7 +582,7 @@ export default function Species() {
     !!url && hiddenPhotoSet.has(url);
 
   return (
-    <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6">
+    <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 overflow-x-hidden">
       {/* Top bar: back link on the left, Edit-species button on the right */}
       <div className="flex items-center justify-between mb-6 gap-3">
         <BackButton fallback="/browse" label="Back" />
@@ -641,7 +641,7 @@ export default function Species() {
 
       {/* Hero header */}
       <div className="grid lg:grid-cols-12 gap-6 lg:gap-10 mb-12">
-        <div className="lg:col-span-7">
+        <div className="lg:col-span-7 min-w-0">
           <div className="relative aspect-[3/2] sm:aspect-[16/10] max-h-[55vh] rounded-lg overflow-hidden border border-border bg-muted">
             {heroPhoto?.medium_url ? (
               <img
@@ -790,7 +790,7 @@ export default function Species() {
           )}
         </div>
 
-        <div className="lg:col-span-5">
+        <div className="lg:col-span-5 min-w-0">
           <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground mb-3">
             {displayClass === "Amphibia" ? "Amphibian" : "Reptile"}
             {displayFamily ? ` · ${displayFamily}` : ""}
