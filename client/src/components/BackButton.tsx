@@ -15,7 +15,7 @@ type BackButtonProps = {
  * Uses wouter's setLocation (not window.history.back) because in the
  * Perplexity iframe proxy the browser history stack contains entries from
  * the parent shell — calling history.back() can step past our iframe and
- * "kill" the app window. We track our own internal hash-route stack via
+ * "kill" the app window. We track our own internal route stack via
  * navHistory and forward-navigate to the previous entry, which is always
  * safe.
  */

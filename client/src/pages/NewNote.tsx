@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
+import { popPreviousInternal } from "@/lib/navHistory";
 import { useMutation } from "@tanstack/react-query";
 import { BookOpen, Loader2 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
@@ -26,12 +27,9 @@ export default function NewNote() {
     if (!user) setLocation("/login");
   }, [user, setLocation]);
 
-  // Pre-fill species from ?speciesId= query param (hash router)
+  // Pre-fill species from ?speciesId= query param (path router)
   useEffect(() => {
-    const hash = window.location.hash || "";
-    const qIdx = hash.indexOf("?");
-    if (qIdx < 0) return;
-    const params = new URLSearchParams(hash.slice(qIdx + 1));
+    const params = new URLSearchParams(window.location.search);
     const sid = params.get("speciesId");
     if (!sid) return;
     const id = parseInt(sid, 10);
@@ -167,7 +165,7 @@ export default function NewNote() {
         <div className="flex items-center gap-2 justify-end pt-2">
           <Button
             variant="outline"
-            onClick={() => window.history.back()}
+            onClick={() => setLocation(popPreviousInternal() ?? "/feed")}
             data-testid="button-cancel-note"
           >
             Cancel
