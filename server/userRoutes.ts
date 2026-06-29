@@ -497,6 +497,23 @@ function enrichNotesForList(
   );
 }
 
+// Convert a stored data URL ('data:image/...;base64,...') to a stable binary
+// URL the browser can fetch lazily. When the column is null we keep null so
+// the frontend's existing `{img && <img />}` checks stay correct. When the
+// value is already a non-data URL (legacy/external), pass it through.
+function avatarUrlFor(userId: number, dataUrl: string | null | undefined): string | null {
+  if (!dataUrl) return null;
+  if (typeof dataUrl !== "string") return null;
+  if (dataUrl.startsWith("data:")) return `/api/users/${userId}/avatar`;
+  return dataUrl;
+}
+function coverUrlFor(userId: number, dataUrl: string | null | undefined): string | null {
+  if (!dataUrl) return null;
+  if (typeof dataUrl !== "string") return null;
+  if (dataUrl.startsWith("data:")) return `/api/users/${userId}/cover`;
+  return dataUrl;
+}
+
 function authorMap(userIds: number[]): Map<number, PublicUser> {
   const m = new Map<number, PublicUser>();
   for (const id of Array.from(new Set(userIds))) {
@@ -507,8 +524,11 @@ function authorMap(userIds: number[]): Map<number, PublicUser> {
         username: u.username,
         displayName: u.displayName,
         bio: null,
-        avatarDataUrl: u.avatarDataUrl,
-        coverDataUrl: (u as any).coverDataUrl ?? null,
+        // Replace inline base64 (which can be 1MB+ per user) with stable
+        // /api/users/:id/avatar binary URLs. With N records in a list
+        // response, repeating the same 1MB avatar N times was the OOM.
+        avatarDataUrl: avatarUrlFor(u.id, u.avatarDataUrl),
+        coverDataUrl: coverUrlFor(u.id, (u as any).coverDataUrl ?? null),
         avatarPos: (u as any).avatarPos ?? null,
         coverPos: (u as any).coverPos ?? null,
         website: null,
@@ -648,8 +668,8 @@ export function registerUserRoutes(app: Express) {
       username: u.username,
       displayName: u.displayName,
       bio: null,
-      avatarDataUrl: u.avatarDataUrl,
-      coverDataUrl: (u as any).coverDataUrl ?? null,
+      avatarDataUrl: avatarUrlFor(u.id, u.avatarDataUrl),
+      coverDataUrl: coverUrlFor(u.id, (u as any).coverDataUrl ?? null),
       avatarPos: (u as any).avatarPos ?? null,
       coverPos: (u as any).coverPos ?? null,
       website: null,
@@ -927,6 +947,42 @@ export function registerUserRoutes(app: Express) {
     // Records are immutable in practice (photo never re-encoded), so cache
     // aggressively. Browse/MapSearch refetch their lists, not the photos.
     res.setHeader("Cache-Control", "public, max-age=86400, immutable");
+    res.end(buf);
+  });
+
+  // Serve a user's avatar as binary. List endpoints now return
+  // `/api/users/:id/avatar` instead of inlining ~100KB-1MB of base64 per row.
+  // Public-readable: anyone fetching a feed sees author avatars.
+  app.get("/api/users/:id/avatar", (req: Request, res: Response) => {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) { res.status(400).end(); return; }
+    const u = storage.getUser(id);
+    if (!u || !u.avatarDataUrl) { res.status(404).end(); return; }
+    const m = /^data:([^;,]+);base64,(.+)$/.exec(u.avatarDataUrl);
+    if (!m) { res.status(404).end(); return; }
+    let buf: Buffer;
+    try { buf = Buffer.from(m[2], "base64"); } catch { res.status(404).end(); return; }
+    res.setHeader("Content-Type", m[1] || "image/jpeg");
+    res.setHeader("Content-Length", String(buf.length));
+    // Avatars change occasionally; cache 1h on the browser, with revalidation.
+    res.setHeader("Cache-Control", "public, max-age=3600");
+    res.end(buf);
+  });
+
+  // Serve a user's cover photo as binary.
+  app.get("/api/users/:id/cover", (req: Request, res: Response) => {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) { res.status(400).end(); return; }
+    const u = storage.getUser(id);
+    const cover = (u as any)?.coverDataUrl as string | null | undefined;
+    if (!u || !cover) { res.status(404).end(); return; }
+    const m = /^data:([^;,]+);base64,(.+)$/.exec(cover);
+    if (!m) { res.status(404).end(); return; }
+    let buf: Buffer;
+    try { buf = Buffer.from(m[2], "base64"); } catch { res.status(404).end(); return; }
+    res.setHeader("Content-Type", m[1] || "image/jpeg");
+    res.setHeader("Content-Length", String(buf.length));
+    res.setHeader("Cache-Control", "public, max-age=3600");
     res.end(buf);
   });
 
@@ -2151,7 +2207,7 @@ export function registerUserRoutes(app: Express) {
           username: u.username,
           displayName: u.displayName,
           email: u.email ?? null,
-          avatarDataUrl: u.avatarDataUrl ?? null,
+          avatarDataUrl: avatarUrlFor(u.id, u.avatarDataUrl),
           role: (u.role || "none") as UserRole,
           createdAt: u.createdAt,
           permissions,
