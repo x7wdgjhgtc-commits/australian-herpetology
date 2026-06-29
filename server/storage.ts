@@ -22,6 +22,7 @@ import {
   speciesRangePolygons,
   speciesRecordHidden,
   distributionImportJob,
+  apiCache,
 } from "@shared/schema";
 import type {
   User,
@@ -460,6 +461,15 @@ sqlite.exec(`
     updated_at INTEGER NOT NULL,
     finished_at INTEGER
   );
+
+  -- Persistent cache for upstream JSON responses (iNat + ALA).
+  -- url is the full upstream URL (incl. query string); payload is the JSON body.
+  CREATE TABLE IF NOT EXISTS api_cache (
+    url TEXT PRIMARY KEY,
+    payload TEXT NOT NULL,
+    fetched_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS api_cache_fetched_idx ON api_cache(fetched_at);
 `);
 
 export const db = drizzle(sqlite);
@@ -2875,6 +2885,53 @@ export class DatabaseStorage {
       })
       .returning()
       .get();
+  }
+
+  // ───────── api_cache (persistent upstream JSON cache) ─────────
+
+  getApiCache(url: string): { payload: string; fetchedAt: number } | undefined {
+    const row = db
+      .select({ payload: apiCache.payload, fetchedAt: apiCache.fetchedAt })
+      .from(apiCache)
+      .where(eq(apiCache.url, url))
+      .get();
+    return row || undefined;
+  }
+
+  setApiCache(url: string, payload: string): void {
+    const now = Date.now();
+    db.insert(apiCache)
+      .values({ url, payload, fetchedAt: now })
+      .onConflictDoUpdate({
+        target: apiCache.url,
+        set: { payload, fetchedAt: now },
+      })
+      .run();
+  }
+
+  /**
+   * Delete cache entries. If `prefix` is given, only URLs starting with that
+   * prefix are removed (used for per-species refresh). Returns the number of
+   * rows removed.
+   */
+  clearApiCache(prefix?: string): number {
+    if (prefix) {
+      const result = db
+        .delete(apiCache)
+        .where(sql`${apiCache.url} LIKE ${prefix + "%"}`)
+        .run();
+      return result.changes ?? 0;
+    }
+    const result = db.delete(apiCache).run();
+    return result.changes ?? 0;
+  }
+
+  countApiCache(): number {
+    const row = db
+      .select({ count: sql<number>`COUNT(*)` })
+      .from(apiCache)
+      .get();
+    return row?.count ?? 0;
   }
 }
 

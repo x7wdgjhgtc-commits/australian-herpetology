@@ -1931,3 +1931,19 @@ export async function apiUnhideRecord(
   );
   return res.json();
 }
+
+/**
+ * Admin: drop every cached upstream JSON entry that references this species.
+ * Used by the "Refresh species data" button on the Species page so the next
+ * read of that species will live-fetch from iNat/ALA instead of serving the
+ * cached payload.
+ */
+export async function apiRefreshSpeciesCache(
+  speciesId: number,
+): Promise<{ ok: true; speciesId: number; sqliteRemoved: number; memoryRemoved: number }> {
+  const res = await apiRequest(
+    "POST",
+    `/api/admin/cache/refresh-species/${speciesId}`,
+  );
+  return res.json();
+}

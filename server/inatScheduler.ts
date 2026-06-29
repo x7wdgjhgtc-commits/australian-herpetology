@@ -14,8 +14,13 @@ import { storage } from "./storage";
 import { syncInatForUser } from "./inat";
 
 const DEFAULT_INTERVAL_MS = 60 * 60 * 1000; // run scheduler hourly
-const DEFAULT_STALE_MS = 60 * 60 * 1000; // resync if last import > 1h old
+// User requested: update users' iNat sync once a day, not once an hour. Raises
+// the cutoff for who counts as "due" — most passes will now find 0 due users.
+const DEFAULT_STALE_MS = 24 * 60 * 60 * 1000; // resync if last import > 24h old
 const PER_USER_DELAY_MS = 3_000; // pause between user syncs
+// Cap how many users a single pass will touch, so a busy site can't be DoS'd
+// by its own scheduler. The remaining users get picked up the next pass.
+const MAX_USERS_PER_PASS = 3;
 
 let timer: NodeJS.Timeout | null = null;
 let inFlight = false;
@@ -39,8 +44,10 @@ function sleep(ms: number): Promise<void> {
  * `staleMs`. Sequential, with a polite delay between users.
  */
 // Memory safety: if RSS is already this high, skip the pass. Render's
-// smallest paid dyno has ~512MB, so we leave headroom for the request path.
-const MAX_RSS_BEFORE_SKIP = 380 * 1024 * 1024;
+// smallest paid dyno has ~512MB; with the new persistent cache the steady-
+// state RSS is much lower, so we can be aggressive about aborting before
+// the OOM killer steps in.
+const MAX_RSS_BEFORE_SKIP = 250 * 1024 * 1024;
 
 async function runPass(staleMs: number): Promise<void> {
   if (inFlight) {
@@ -67,8 +74,12 @@ async function runPass(staleMs: number): Promise<void> {
       );
       return;
     }
-    log(`pass start — ${due.length} of ${candidates.length} connected users due`);
-    for (const user of due) {
+    const batch = due.slice(0, MAX_USERS_PER_PASS);
+    log(
+      `pass start — ${batch.length} of ${due.length} due users this pass ` +
+        `(${candidates.length} total connected)`,
+    );
+    for (const user of batch) {
       const login = user.inatUsername;
       if (!login) continue;
       // Abort the rest of the pass if memory is climbing toward the dyno cap.

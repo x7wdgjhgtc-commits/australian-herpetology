@@ -98,34 +98,76 @@ const AU_PLACE_ID = 6744;
 // iconic_taxa we care about
 const ICONIC = "Reptilia,Amphibia";
 
-type CacheEntry = { value: unknown; expires: number };
+/**
+ * Two-layer cache for upstream JSON (iNat + ALA).
+ *
+ *   1. Tiny in-memory LRU (50 entries) for the very hottest URLs. Keeps RSS
+ *      flat — was previously 1000 entries which OOMed the dyno.
+ *   2. SQLite `api_cache` table for everything else — survives restarts and is
+ *      the actual source of truth once a URL has been hit once.
+ *
+ * Behaviour:
+ *   • Cache hit (hot or SQLite)  → served from cache, no live fetch.
+ *   • Cache miss                 → live fetch + write-through to SQLite, so
+ *                                  the same URL is never live-fetched twice
+ *                                  for the life of the disk.
+ *   • DISABLE_LIVE_FETCH=1 env   → cache miss throws instead of live-fetching
+ *                                  (panic switch if iNat starts rate-limiting).
+ *
+ * The legacy `ttlMs` second argument is preserved for backwards-compat (every
+ * existing call site passes one) but is no longer used — entries are persistent
+ * until an admin clears them.
+ */
+type CacheEntry = { value: unknown };
 const cache = new Map<string, CacheEntry>();
-const MAX_CACHE = 1000;
+const MAX_CACHE = 50;
+const DISABLE_LIVE_FETCH = process.env.DISABLE_LIVE_FETCH === "1";
 
 function cacheGet(key: string): unknown | null {
   const hit = cache.get(key);
   if (!hit) return null;
-  if (hit.expires < Date.now()) {
-    cache.delete(key);
-    return null;
-  }
   // refresh LRU position
   cache.delete(key);
   cache.set(key, hit);
   return hit.value;
 }
 
-function cacheSet(key: string, value: unknown, ttlMs: number) {
+function cacheSet(key: string, value: unknown) {
   if (cache.size >= MAX_CACHE) {
     const firstKey = cache.keys().next().value;
     if (firstKey) cache.delete(firstKey);
   }
-  cache.set(key, { value, expires: Date.now() + ttlMs });
+  cache.set(key, { value });
 }
 
-async function fetchJson(url: string, ttlMs = 1000 * 60 * 60): Promise<unknown> {
-  const cached = cacheGet(url);
-  if (cached) return cached;
+async function fetchJson(
+  url: string,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _legacyTtlMs: number = 1000 * 60 * 60,
+): Promise<unknown> {
+  // 1. Hot in-memory.
+  const hot = cacheGet(url);
+  if (hot !== null) return hot;
+
+  // 2. Persistent SQLite.
+  try {
+    const row = storage.getApiCache(url);
+    if (row) {
+      const parsed = JSON.parse(row.payload);
+      cacheSet(url, parsed);
+      return parsed;
+    }
+  } catch (err) {
+    console.error(`api_cache read failed for ${url}:`, err);
+  }
+
+  // 3. Cache miss — live fetch (unless globally disabled).
+  if (DISABLE_LIVE_FETCH) {
+    throw new Error(
+      `No cached data for ${url} and live upstream fetches are disabled.`,
+    );
+  }
+
   const res = await fetch(url, {
     headers: {
       "User-Agent": "AustralianHerpetology/1.0 (field guide app)",
@@ -136,9 +178,39 @@ async function fetchJson(url: string, ttlMs = 1000 * 60 * 60): Promise<unknown> 
     throw new Error(`Upstream ${res.status}: ${url}`);
   }
   const data = await res.json();
-  cacheSet(url, data, ttlMs);
+
+  // Persist + hot-cache for next time.
+  try {
+    storage.setApiCache(url, JSON.stringify(data));
+  } catch (err) {
+    console.error(`api_cache write failed for ${url}:`, err);
+  }
+  cacheSet(url, data);
   return data;
 }
+
+/**
+ * Drop the in-memory hot cache. Used by the admin cache-clear endpoint so the
+ * next request re-checks SQLite (which is also cleared) and live-fetches if
+ * needed. The SQLite layer is dropped via `storage.clearApiCache()` directly.
+ */
+export function clearInMemoryCache(prefix?: string): number {
+  if (!prefix) {
+    const n = cache.size;
+    cache.clear();
+    return n;
+  }
+  let removed = 0;
+  for (const key of Array.from(cache.keys())) {
+    if (key.startsWith(prefix)) {
+      cache.delete(key);
+      removed++;
+    }
+  }
+  return removed;
+}
+
+export { fetchJson };
 
 function handleError(res: Response, err: unknown) {
   console.error(err);

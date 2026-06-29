@@ -27,6 +27,7 @@ import {
   apiListSpeciesArticles,
   apiCreateSpeciesArticle,
   apiDeleteSpeciesArticle,
+  apiRefreshSpeciesCache,
   type SpeciesArticleRow,
   type TaxonDetailResponse,
   type ObservationsResponse,
@@ -41,7 +42,7 @@ import {
 import { useAuth } from "@/lib/auth";
 import { queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { Trophy, CheckCircle2, Heart, Pin, Pencil, EyeOff, Eye, FileText, Upload, Download, Plus, Trash2, Link as LinkIcon, BadgeCheck, Star, X as XIcon } from "lucide-react";
+import { Trophy, CheckCircle2, Heart, Pin, Pencil, EyeOff, Eye, FileText, Upload, Download, Plus, Trash2, Link as LinkIcon, BadgeCheck, Star, X as XIcon, RefreshCw } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ArrowLeft, ExternalLink, MapPin, Calendar, ImageOff, Ruler } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -53,6 +54,17 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -421,6 +433,32 @@ export default function Species() {
     },
   });
 
+  // Admin: drop every cached upstream payload that references this species so
+  // the next visitor triggers a fresh live fetch from iNat/ALA. The actual
+  // refetch happens lazily on the next render that needs the data.
+  const refreshCacheMut = useMutation({
+    mutationFn: () => apiRefreshSpeciesCache(speciesIdNum!),
+    onSuccess: (data) => {
+      // Invalidate every species-scoped query so they re-fetch through the
+      // (now empty) cache and refill it from upstream.
+      queryClient.invalidateQueries({ queryKey: ["/api/taxon", speciesIdNum] });
+      queryClient.invalidateQueries({ queryKey: ["/api/species", speciesIdNum] });
+      queryClient.invalidateQueries({ queryKey: ["observations", speciesIdNum] });
+      queryClient.invalidateQueries({ queryKey: ["distribution", speciesIdNum] });
+      toast({
+        title: "Species data refreshed",
+        description: `Cleared ${data.sqliteRemoved} cached entries—next page load will fetch fresh.`,
+      });
+    },
+    onError: (e: any) => {
+      toast({
+        title: "Refresh failed",
+        description: e?.message || "Could not clear cached data",
+        variant: "destructive",
+      });
+    },
+  });
+
   if (loadingTaxon) {
     return (
       <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8 space-y-6">
@@ -549,15 +587,55 @@ export default function Species() {
       <div className="flex items-center justify-between mb-6 gap-3">
         <BackButton fallback="/browse" label="Back" />
         {isEditorPlus && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={openEditSpecies}
-            data-testid="button-edit-species"
-          >
-            <Pencil className="h-3.5 w-3.5 mr-1.5" />
-            Edit species profile
-          </Button>
+          <div className="flex items-center gap-2">
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={refreshCacheMut.isPending}
+                  data-testid="button-refresh-species-cache"
+                >
+                  <RefreshCw
+                    className={`h-3.5 w-3.5 mr-1.5 ${
+                      refreshCacheMut.isPending ? "animate-spin" : ""
+                    }`}
+                  />
+                  Refresh data
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Refresh species data?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Drops every cached upstream payload for this species. The
+                    next page load will fetch fresh data from iNaturalist and
+                    ALA, which may take a few seconds.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel data-testid="button-refresh-cancel">
+                    Cancel
+                  </AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={() => refreshCacheMut.mutate()}
+                    data-testid="button-refresh-confirm"
+                  >
+                    Refresh
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={openEditSpecies}
+              data-testid="button-edit-species"
+            >
+              <Pencil className="h-3.5 w-3.5 mr-1.5" />
+              Edit species profile
+            </Button>
+          </div>
         )}
       </div>
 

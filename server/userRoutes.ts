@@ -7,6 +7,7 @@ import { z } from "zod";
 import { storage, sqlite, type PublicUser } from "./storage";
 import type { User } from "@shared/schema";
 import { resolveInatUser, syncInatForUser } from "./inat";
+import { clearInMemoryCache } from "./routes";
 import {
   startBulkImport,
   cancelJob,
@@ -2254,6 +2255,82 @@ export function registerUserRoutes(app: Express) {
       })),
     });
   });
+
+  // ───── API cache management ─────
+  // The server caches every upstream JSON response (iNat + ALA) to SQLite so
+  // we never re-fetch the same URL twice. These endpoints let admins clear
+  // the cache when a species page needs fresh data from upstream.
+
+  // GET /api/admin/cache — diagnostics: row count + a sample of cached URLs.
+  app.get(
+    "/api/admin/cache",
+    requireRole("moderator"),
+    (_req: Request, res: Response) => {
+      try {
+        const total = storage.countApiCache();
+        res.json({ total });
+      } catch (err: any) {
+        res.status(500).json({ error: err?.message || "cache stat failed" });
+      }
+    },
+  );
+
+  // POST /api/admin/cache/clear — drops cache entries.
+  //   body: { prefix?: string }  (e.g. "https://api.inaturalist.org/v1/taxa/12345")
+  //   omit `prefix` to clear ALL cached entries (rebuild from scratch).
+  app.post(
+    "/api/admin/cache/clear",
+    requireRole("moderator"),
+    (req: Request, res: Response) => {
+      try {
+        const prefix = typeof req.body?.prefix === "string" && req.body.prefix.trim()
+          ? req.body.prefix.trim()
+          : undefined;
+        const sqliteRemoved = storage.clearApiCache(prefix);
+        const memoryRemoved = clearInMemoryCache(prefix);
+        res.json({ ok: true, sqliteRemoved, memoryRemoved, prefix: prefix ?? null });
+      } catch (err: any) {
+        res.status(500).json({ error: err?.message || "cache clear failed" });
+      }
+    },
+  );
+
+  // POST /api/admin/cache/refresh-species/:id — convenience endpoint for the
+  // "Refresh species data" button on the species edit page. Clears every
+  // cached URL that mentions this species id (iNat taxon, ALA records, etc.).
+  app.post(
+    "/api/admin/cache/refresh-species/:id",
+    requireRole("moderator"),
+    (req: Request, res: Response) => {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isFinite(id)) {
+        res.status(400).json({ error: "invalid species id" });
+        return;
+      }
+      try {
+        // Clear every cached URL that contains this taxon id. URL shapes vary
+        // (iNat /taxa/:id, /observations?taxon_id=:id, ALA biocache q=lsid:...)
+        // so we clear by substring match on `/:id` and `taxon_id=:id`.
+        const fragA = `/${id}`;
+        const fragB = `taxon_id=${id}`;
+        const sqliteA = storage.clearApiCache(`https://api.inaturalist.org/v1/taxa/${id}`);
+        const sqliteB = sqlite
+          .prepare(`DELETE FROM api_cache WHERE url LIKE ? OR url LIKE ?`)
+          .run(`%${fragA}%`, `%${fragB}%`).changes ?? 0;
+        const memoryRemoved =
+          clearInMemoryCache(`https://api.inaturalist.org/v1/taxa/${id}`) +
+          clearInMemoryCache(fragB);
+        res.json({
+          ok: true,
+          speciesId: id,
+          sqliteRemoved: sqliteA + sqliteB,
+          memoryRemoved,
+        });
+      } catch (err: any) {
+        res.status(500).json({ error: err?.message || "species refresh failed" });
+      }
+    },
+  );
 
   // ───── iNaturalist observer blocklist ─────
   // List, add, and remove iNat observers whose observations should never

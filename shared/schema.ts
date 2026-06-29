@@ -684,3 +684,23 @@ export const speciesAdminEntries = sqliteTable("species_admin_entries", {
 });
 
 export type SpeciesAdminEntry = typeof speciesAdminEntries.$inferSelect;
+
+/**
+ * Persistent cache for upstream JSON responses (iNat + ALA).
+ *
+ * The point of this cache is to stop the server from re-fetching the same
+ * upstream payloads on every request. Once a URL has been fetched once,
+ * subsequent reads come from SQLite — which means the in-memory layer can
+ * stay small (a tiny LRU) and OOMs stop.
+ *
+ * - url:       full upstream URL (primary key, includes query string)
+ * - payload:   JSON-stringified response body
+ * - fetchedAt: ms epoch — used for diagnostics + admin TTL refresh logic
+ */
+export const apiCache = sqliteTable("api_cache", {
+  url: text("url").primaryKey(),
+  payload: text("payload").notNull(),
+  fetchedAt: integer("fetched_at").notNull(),
+});
+
+export type ApiCacheEntry = typeof apiCache.$inferSelect;
