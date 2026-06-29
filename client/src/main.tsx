@@ -18,9 +18,14 @@ import { installNavHistory } from "./lib/navHistory";
  */
 if (window.location.hash && window.location.hash.startsWith("#/")) {
   // The legacy URL shape was `/#/foo?bar` — everything after the `#` is the
-  // route. Strip the `#` and use that as the new pathname+search.
+  // route. Strip the `#` and use that as the new pathname+search. Build an
+  // absolute URL so the browser unambiguously commits the address-bar update
+  // (some Chromium builds keep a stale hash in the UI when replaceState is
+  // called with a same-origin path that differs only in the hash fragment).
   const hashPath = window.location.hash.slice(1); // "#/foo?bar" -> "/foo?bar"
-  window.history.replaceState(null, "", hashPath);
+  const newUrl = new URL(hashPath, window.location.origin);
+  // Force-clear any residual hash, then replace.
+  window.history.replaceState(null, "", newUrl.pathname + newUrl.search);
 }
 
 installNavHistory();
